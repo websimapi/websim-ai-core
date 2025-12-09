@@ -112,36 +112,68 @@ export class AudioManager {
 
     /**
      * Determines if input is likely an echo of output.
-     * Checks if the input is a substring or subset of the output.
+     * Uses sequence matching to avoid false positives on reused words.
      */
     _isEcho(input, output) {
         if (!output || !input) return false;
         
-        // Normalize: lowercase, remove punctuation, collapse spaces
-        const normalize = (str) => str.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
-        
-        const normInput = normalize(input);
-        const normOutput = normalize(output);
+        const normInput = this._normalize(input);
+        const normOutput = this._normalize(output);
         
         if (!normInput) return false;
 
-        // Strategy: Strict Word Subset Check
-        // If ALL words in the input ARE in the output, it is likely an echo (microphone hearing the speaker).
-        // If ANY word in the input is NOT in the output, it is likely the user saying something new (interruption).
-        
-        const inWords = normInput.split(' ');
-        const outWords = new Set(normOutput.split(' '));
-        
-        // Check for words that shouldn't be there (foreign words)
-        const foreignWords = inWords.filter(word => !outWords.has(word));
-
-        // If we found words that are not in the AI's speech, it's the user.
-        if (foreignWords.length > 0) {
-            return false; // Not an echo (User is speaking)
+        // 1. Exact Sequence Match (Substring)
+        // If the mic input is a contiguous substring of what the AI said, it's almost certainly an echo.
+        // e.g. AI: "Hello world" -> Mic: "Hello" (Echo)
+        if (normOutput.includes(normInput)) {
+            return true;
         }
 
-        // If all words matched, it's an echo.
-        return true;
+        return false;
+    }
+
+    _normalize(str) {
+        return str.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+    }
+
+    /**
+     * Removes the AI's speech from the beginning of the user input if it leaked in.
+     * e.g. AI: "I am a robot" -> Mic: "I am a stop talking" -> Result: "stop talking"
+     */
+    _removeEchoPrefix(input, output) {
+        if (!output || !input) return input;
+
+        const normInput = this._normalize(input);
+        const normOutput = this._normalize(output);
+        
+        // Simple heuristic: If input STARTS with a significant chunk of output
+        // We find the largest common prefix in terms of words
+        const inWords = normInput.split(' ');
+        const outWords = normOutput.split(' ');
+
+        let matchCount = 0;
+        for (let i = 0; i < Math.min(inWords.length, outWords.length); i++) {
+            if (inWords[i] === outWords[i]) {
+                matchCount++;
+            } else {
+                break;
+            }
+        }
+
+        // If we matched a prefix, strip it from the original input
+        // (This is approximate because normalization loses punctuation, but usually fine)
+        if (matchCount > 0) {
+            // Reconstruct the non-matching part
+            // We use the original words to preserve casing/punctuation where possible, 
+            // but for simplicity, we might just return the suffix of the string.
+            // Let's use word count removal.
+            const originalWords = input.trim().split(/\s+/);
+            if (matchCount < originalWords.length) {
+                return originalWords.slice(matchCount).join(' ');
+            }
+        }
+        
+        return input;
     }
 
     startListening() {
