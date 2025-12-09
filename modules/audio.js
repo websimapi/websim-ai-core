@@ -71,11 +71,16 @@ export class AudioManager {
 
             // --- 1. Interruption Logic (Works on Interim & Final) ---
             if (this.synthesis.speaking) {
-                // If we detect non-echo speech while speaking, stop immediately
-                // We check interim results too for faster reaction
-                if (!this._isEcho(currentInput, this.recentSpokenText)) {
-                    console.log("Interruption detected:", currentInput);
+                // Check if the current input is just an echo of what we are saying
+                const isEcho = this._isEcho(currentInput, this.recentSpokenText);
+                
+                if (!isEcho) {
+                    // It's not an echo, so it must be the user interrupting
+                    console.log("Interruption detected! User said:", currentInput);
                     this.stopSpeaking();
+                    // We keep listening. The final result will trigger the processing logic in onresult loop.
+                } else {
+                    // It's an echo, ignore it.
                 }
             }
 
@@ -120,25 +125,23 @@ export class AudioManager {
         
         if (!normInput) return false;
 
-        // Strategy 1: Substring Check (Primary)
-        // If the microphone hears exactly what the AI is saying (or a fragment of it), it's an echo.
-        if (normOutput.includes(normInput)) return true;
-
-        // Strategy 2: Word Subset Check (Secondary)
-        // Handles cases where mic picks up "word1 ... word2" with skips (poor mic quality / gating)
+        // Strategy: Strict Word Subset Check
+        // If ALL words in the input ARE in the output, it is likely an echo (microphone hearing the speaker).
+        // If ANY word in the input is NOT in the output, it is likely the user saying something new (interruption).
+        
         const inWords = normInput.split(' ');
         const outWords = new Set(normOutput.split(' '));
         
-        // If every significant word in the input exists in the output, treat as echo.
-        // This is aggressive but necessary to prevent self-conversation loops.
-        // E.g. AI: "I like cats" -> User: "cats" (Echo) -> User: "dogs" (Interruption)
-        const allWordsPresent = inWords.every(word => {
-            // Allow very short words to bypass if they are the ONLY mismatch, 
-            // but generally if all words match, it's an echo.
-            return outWords.has(word);
-        });
+        // Check for words that shouldn't be there (foreign words)
+        const foreignWords = inWords.filter(word => !outWords.has(word));
 
-        return allWordsPresent;
+        // If we found words that are not in the AI's speech, it's the user.
+        if (foreignWords.length > 0) {
+            return false; // Not an echo (User is speaking)
+        }
+
+        // If all words matched, it's an echo.
+        return true;
     }
 
     startListening() {
@@ -159,8 +162,12 @@ export class AudioManager {
     }
 
     stopSpeaking() {
-        if (this.synthesis.speaking) {
+        if (this.synthesis.speaking || this.currentSpokenText) {
             this.synthesis.cancel();
+            // Ensure state cleanup happens immediately as onend might not fire reliably on cancel
+            this.currentSpokenText = "";
+            this.speakEndTime = Date.now();
+            if (this.onSpeakEnd) this.onSpeakEnd();
         }
     }
 

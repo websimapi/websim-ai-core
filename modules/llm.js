@@ -41,9 +41,9 @@ ${JSON.stringify(currentMemory)}
 USER INPUT: "${userText}"
 
 INSTRUCTIONS:
-1. PRESERVE INFORMATION: CRITICAL - You must retain all historical context from the 'summary' and 'facts'. Do NOT replace the summary with just the recent interaction; append/integrate it.
-2. MERGE: The 'summary' must be a running history of the ENTIRE conversation lifecycle, not just the last turn.
-3. FACTS: Keep all existing facts. Add new ones only if clear and important.
+1. PRESERVE INFORMATION: You are receiving the EXISTING MEMORY. You must Return the NEW MEMORY object.
+2. SUMMARY UPDATE: Do NOT overwrite the summary with just the latest chat. The summary must be a cumulative narrative of the whole history. If the existing summary is long, condense it but do not lose key context.
+3. FACTS: Copy ALL existing facts unless they are proven false. Add new facts. Do NOT drop facts arbitrarily.
 4. RESPONSE STRATEGY: Provide a distinct instruction for how the AI should reply.
 
 Respond strictly with this JSON schema:
