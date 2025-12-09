@@ -42,7 +42,7 @@ USER INPUT: "${userText}"
 
 INSTRUCTIONS:
 1. PRESERVE INFORMATION: Do not delete existing facts or summary details unless they are explicitly contradicted by the user.
-2. MERGE: Combine the "current memory" summary with the new interaction to create a comprehensive updated summary. Prioritize retaining specific details over brevity.
+2. MERGE: Combine the "current memory" summary with the new interaction to create a comprehensive updated summary.
 3. FACTS: Keep old facts. Append new facts only if significant.
 4. RESPONSE STRATEGY: Provide a distinct instruction for how the AI should reply.
 
