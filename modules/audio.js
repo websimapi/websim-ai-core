@@ -33,7 +33,7 @@ export class AudioManager {
 
         this.recognition = new SpeechRecognition();
         this.recognition.continuous = true; // Keep listening
-        this.recognition.interimResults = false;
+        this.recognition.interimResults = true;
         this.recognition.lang = 'en-US';
 
         this.recognition.onstart = () => {
@@ -54,35 +54,46 @@ export class AudioManager {
         };
 
         this.recognition.onresult = (event) => {
-            // Get the latest result
-            const resultIndex = event.results.length - 1;
-            const transcript = event.results[resultIndex][0].transcript.trim();
-            const isFinal = event.results[resultIndex].isFinal;
+            let interimTranscript = '';
+            let finalTranscript = '';
 
-            if (transcript.length > 0) {
-                // INTELLIGENT ECHO CANCELLATION
-                const now = Date.now();
-                const isSpeaking = this.synthesis.speaking;
-                
-                // Check for echo if the AI is speaking OR if it recently stopped (within 1.5s)
-                // This buffer handles audio latency, room reverb, and processing delays
-                const isEchoCheckPeriod = isSpeaking || (now - this.speakEndTime < 1500);
+            // Combine results to handle continuous stream
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    finalTranscript += event.results[i][0].transcript;
+                } else {
+                    interimTranscript += event.results[i][0].transcript;
+                }
+            }
 
-                if (isEchoCheckPeriod) {
-                    // Check if the input is likely just the AI hearing itself
-                    if (this._isEcho(transcript, this.recentSpokenText)) {
-                        console.warn("Echo detected & ignored:", transcript);
-                        return; // Ignore this input
-                    }
-                    
-                    // If it's NOT an echo, but we are speaking, it's a valid interruption
-                    if (isSpeaking) {
-                        console.log("Interruption detected:", transcript);
-                        this.stopSpeaking(); 
+            const currentInput = (finalTranscript || interimTranscript).trim();
+            if (!currentInput) return;
+
+            // --- 1. Interruption Logic (Works on Interim & Final) ---
+            if (this.synthesis.speaking) {
+                // If we detect non-echo speech while speaking, stop immediately
+                // We check interim results too for faster reaction
+                if (!this._isEcho(currentInput, this.recentSpokenText)) {
+                    console.log("Interruption detected:", currentInput);
+                    this.stopSpeaking();
+                }
+            }
+
+            // --- 2. Processing Logic (Only Final Results) ---
+            if (finalTranscript.trim()) {
+                // Re-check echo in case we just stopped speaking
+                // We use a small buffer time after speaking stops to still catch lingering echoes
+                const timeSinceSpeak = Date.now() - this.speakEndTime;
+                const wasRecentlySpeaking = timeSinceSpeak < 1500 || this.synthesis.speaking;
+
+                if (wasRecentlySpeaking) {
+                    if (this._isEcho(finalTranscript, this.recentSpokenText)) {
+                        console.warn("Ignored echo:", finalTranscript);
+                        return;
                     }
                 }
 
-                if (this.onResult) this.onResult(transcript);
+                if (this.onResult) this.onResult(finalTranscript.trim());
             }
         };
 
@@ -96,30 +107,38 @@ export class AudioManager {
 
     /**
      * Determines if input is likely an echo of output.
-     * Uses fuzzy word overlap.
+     * Checks if the input is a substring or subset of the output.
      */
     _isEcho(input, output) {
         if (!output || !input) return false;
         
-        const normInput = input.toLowerCase().replace(/[^\w\s]/g, '');
-        const normOutput = output.toLowerCase().replace(/[^\w\s]/g, '');
+        // Normalize: lowercase, remove punctuation, collapse spaces
+        const normalize = (str) => str.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
         
-        // 1. Direct inclusion
+        const normInput = normalize(input);
+        const normOutput = normalize(output);
+        
+        if (!normInput) return false;
+
+        // Strategy 1: Substring Check (Primary)
+        // If the microphone hears exactly what the AI is saying (or a fragment of it), it's an echo.
         if (normOutput.includes(normInput)) return true;
 
-        // 2. Word Set Overlap (Jaccard-ish)
-        const inWords = normInput.split(/\s+/).filter(w => w);
-        const outWords = new Set(normOutput.split(/\s+/));
+        // Strategy 2: Word Subset Check (Secondary)
+        // Handles cases where mic picks up "word1 ... word2" with skips (poor mic quality / gating)
+        const inWords = normInput.split(' ');
+        const outWords = new Set(normOutput.split(' '));
         
-        if (inWords.length === 0) return false;
+        // If every significant word in the input exists in the output, treat as echo.
+        // This is aggressive but necessary to prevent self-conversation loops.
+        // E.g. AI: "I like cats" -> User: "cats" (Echo) -> User: "dogs" (Interruption)
+        const allWordsPresent = inWords.every(word => {
+            // Allow very short words to bypass if they are the ONLY mismatch, 
+            // but generally if all words match, it's an echo.
+            return outWords.has(word);
+        });
 
-        let matchCount = 0;
-        for (const w of inWords) {
-            if (outWords.has(w)) matchCount++;
-        }
-        
-        // If more than 50% of input words were just spoken by AI, assume echo
-        return (matchCount / inWords.length) > 0.5;
+        return allWordsPresent;
     }
 
     startListening() {
