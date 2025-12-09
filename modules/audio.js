@@ -29,7 +29,7 @@ export class AudioManager {
 
         this.recognition = new SpeechRecognition();
         this.recognition.continuous = true; // Keep listening
-        this.recognition.interimResults = false;
+        this.recognition.interimResults = true;
         this.recognition.lang = 'en-US';
 
         this.recognition.onstart = () => {
@@ -52,26 +52,33 @@ export class AudioManager {
         this.recognition.onresult = (event) => {
             // Get the latest result
             const resultIndex = event.results.length - 1;
-            const transcript = event.results[resultIndex][0].transcript.trim();
-            const isFinal = event.results[resultIndex].isFinal;
+            const result = event.results[resultIndex];
+            const transcript = result[0].transcript.trim();
+            const isFinal = result.isFinal;
 
             if (transcript.length > 0) {
+                // Normalize strings for comparison (remove punctuation, lowercase)
+                const normalize = (str) => str.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ');
+
                 // Check for Interruption: If TTS is speaking
                 if (this.synthesis.speaking) {
-                    // Simple Echo Cancellation:
-                    // If the input is contained in what we are currently saying, ignore it
-                    const cleanTranscript = transcript.toLowerCase();
-                    const cleanSpeech = this.currentSpokenText.toLowerCase();
+                    const cleanTranscript = normalize(transcript);
+                    const cleanSpeech = normalize(this.currentSpokenText);
                     
+                    // Echo Cancellation: If the input is a subset of what we are currently saying, ignore it.
                     if (cleanSpeech.includes(cleanTranscript) && cleanSpeech.length > 0) {
                         return; // Ignore echo
                     }
                     
-                    // If it's distinct, it's an interruption
+                    // If it's distinct (not found in current speech), it's an interruption
+                    console.log("Interruption detected:", transcript);
                     this.stopSpeaking(); 
                 }
 
-                if (this.onResult) this.onResult(transcript);
+                // Only emit result if it is Final
+                if (isFinal) {
+                    if (this.onResult) this.onResult(transcript);
+                }
             }
         };
 
