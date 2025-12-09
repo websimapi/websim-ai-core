@@ -41,17 +41,17 @@ ${JSON.stringify(currentMemory)}
 USER INPUT: "${userText}"
 
 INSTRUCTIONS:
-1. Identify if the user provided new facts (names, preferences, specific data).
-2. Update the 'summary' to be a concise, compressed history of the relationship.
-3. Update 'topic_history' with the current topic.
-4. Provide 'reasoning' for how the chatbot should respond in the next step.
+1. PRESERVE INFORMATION: Do not delete existing facts or summary details unless they are explicitly contradicted by the user.
+2. MERGE: Combine the "current memory" summary with the new interaction to create a comprehensive updated summary.
+3. FACTS: Keep old facts. Append new facts only if significant.
+4. RESPONSE STRATEGY: Provide a distinct instruction for how the AI should reply.
 
 Respond strictly with this JSON schema:
 {
   "updated_memory": {
-    "summary": "string",
-    "facts": ["string"],
-    "topic_history": ["string"]
+    "summary": "string (The comprehensive history of the user and AI relationship, merging old and new)",
+    "facts": ["string" (All valid facts, old + new)],
+    "topic_history": ["string" (Last 5 topics)]
   },
   "response_strategy": "string (instruction for the responder personality)"
 }

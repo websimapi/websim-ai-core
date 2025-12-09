@@ -7,6 +7,8 @@ export class AudioManager {
         this.recognition = null;
         this.synthesis = window.speechSynthesis;
         this.isListening = false;
+        this.isSessionActive = false; // User toggled state
+        this.currentSpokenText = ""; // To detect echo
         
         // Event callbacks
         this.onResult = null;
@@ -26,7 +28,7 @@ export class AudioManager {
         }
 
         this.recognition = new SpeechRecognition();
-        this.recognition.continuous = false; // Stop after one sentence/phrase
+        this.recognition.continuous = true; // Keep listening
         this.recognition.interimResults = false;
         this.recognition.lang = 'en-US';
 
@@ -37,39 +39,76 @@ export class AudioManager {
 
         this.recognition.onend = () => {
             this.isListening = false;
-            if (this.onListenEnd) this.onListenEnd();
+            // Auto-restart if session is active and we didn't explicitly stop it
+            if (this.isSessionActive) {
+                setTimeout(() => {
+                    if (this.isSessionActive && !this.isListening) this.startListening();
+                }, 100);
+            } else {
+                if (this.onListenEnd) this.onListenEnd();
+            }
         };
 
         this.recognition.onresult = (event) => {
-            const transcript = event.results[0][0].transcript;
-            if (this.onResult) this.onResult(transcript);
+            // Get the latest result
+            const resultIndex = event.results.length - 1;
+            const transcript = event.results[resultIndex][0].transcript.trim();
+            const isFinal = event.results[resultIndex].isFinal;
+
+            if (transcript.length > 0) {
+                // Check for Interruption: If TTS is speaking
+                if (this.synthesis.speaking) {
+                    // Simple Echo Cancellation:
+                    // If the input is contained in what we are currently saying, ignore it
+                    const cleanTranscript = transcript.toLowerCase();
+                    const cleanSpeech = this.currentSpokenText.toLowerCase();
+                    
+                    if (cleanSpeech.includes(cleanTranscript) && cleanSpeech.length > 0) {
+                        return; // Ignore echo
+                    }
+                    
+                    // If it's distinct, it's an interruption
+                    this.stopSpeaking(); 
+                }
+
+                if (this.onResult) this.onResult(transcript);
+            }
         };
 
         this.recognition.onerror = (event) => {
-            console.error("Speech recognition error", event.error);
-            this.isListening = false;
-            if (this.onListenEnd) this.onListenEnd();
+            // Ignore no-speech errors which happen frequently in continuous mode
+            if (event.error !== 'no-speech') {
+                console.warn("Speech recognition warning/error", event.error);
+            }
         };
     }
 
     startListening() {
         if (!this.recognition) return;
+        this.isSessionActive = true;
         try {
             this.recognition.start();
         } catch (e) {
-            console.warn("Recognition already started or error", e);
+            // Already started, ignore
         }
     }
 
     stopListening() {
+        this.isSessionActive = false;
         if (!this.recognition) return;
         this.recognition.stop();
+        this.stopSpeaking();
     }
 
-    speak(text) {
+    stopSpeaking() {
         if (this.synthesis.speaking) {
             this.synthesis.cancel();
         }
+    }
+
+    speak(text) {
+        this.stopSpeaking();
+        this.currentSpokenText = text;
 
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'en-US';
@@ -81,11 +120,13 @@ export class AudioManager {
         };
 
         utterance.onend = () => {
+            this.currentSpokenText = ""; // Clear text
             if (this.onSpeakEnd) this.onSpeakEnd();
         };
 
         utterance.onerror = (e) => {
             console.error("TTS Error", e);
+            this.currentSpokenText = "";
             if (this.onSpeakEnd) this.onSpeakEnd();
         };
 

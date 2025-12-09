@@ -36,33 +36,36 @@ function initialize() {
 
 // 2. User User Speech Input
 micBtn.addEventListener('click', () => {
-    if (audio.isListening) {
+    if (audio.isSessionActive) {
         audio.stopListening();
+        // Visual Reset
+        micBtn.style.background = "";
+        setState('idle');
+        statusText.textContent = "Paused";
     } else {
         audio.startListening();
+        // Visual Active
+        micBtn.style.background = "rgba(0, 210, 255, 0.3)";
     }
 });
 
 // Audio Manager Callbacks
 audio.onListenStart = () => {
-    setState('listening');
-    statusText.textContent = "Listening...";
-    micBtn.style.background = "rgba(255, 0, 0, 0.3)";
+    // If we are not currently processing or speaking, show listening
+    if (!app.classList.contains('state-thinking') && !app.classList.contains('state-speaking')) {
+        setState('listening');
+        statusText.textContent = "Listening...";
+    }
 };
 
 audio.onListenEnd = () => {
-    // Only go to idle if we were listening and NOT transitioning to thinking
-    // This prevents the idle state from overriding the thinking state when recognition stops naturally
-    if (app.classList.contains('state-listening')) {
-        setState('idle');
-        statusText.textContent = "Ready";
-        micBtn.style.background = "";
-    }
+    // Managed by session loop mostly
 };
 
 audio.onResult = async (transcript) => {
     console.log("User said:", transcript);
-    // Force state to thinking immediately so onListenEnd doesn't reset to idle
+    
+    // Visual feedback we heard something
     setState('thinking');
     statusText.textContent = "Processing...";
     
@@ -75,13 +78,28 @@ audio.onSpeakStart = () => {
 };
 
 audio.onSpeakEnd = () => {
-    setState('idle');
-    statusText.textContent = "Ready";
+    // Return to listening state visually if session is active
+    if (audio.isSessionActive) {
+        setState('listening');
+        statusText.textContent = "Listening...";
+    } else {
+        setState('idle');
+        statusText.textContent = "Ready";
+    }
 };
 
 // --- Core Logic ---
 
+let isProcessing = false;
+
 async function handleInteraction(userText) {
+    if (isProcessing) {
+        // Prevent concurrent processing to avoid memory race conditions
+        console.log("Already processing, dropping input.");
+        return;
+    }
+    isProcessing = true;
+
     try {
         // --- Step 1: Analysis & Memory ---
         statusText.textContent = "Analyzing & Memorizing...";
@@ -112,6 +130,8 @@ async function handleInteraction(userText) {
         console.error("Interaction failed", e);
         statusText.textContent = "Error";
         setTimeout(() => setState('idle'), 2000);
+    } finally {
+        isProcessing = false;
     }
 }
 
